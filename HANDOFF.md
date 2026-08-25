@@ -41,6 +41,8 @@ Updated: 2026-08-25
   - Captures both repositories' SHAs, status, and binary diffs.
   - Copies root and scripts Project/Manifest files without filename collisions.
   - Produces a timestamped `.tar.gz` and SHA-256 checksum.
+- Added `scripts/revision/run_in_screen.sh` for named, detached experiment sessions that survive
+  SSH disconnects and can be reattached with `screen -r`.
 - Added `scripts/revision/README.md` with setup, smoke, full-run, monitoring, restart, runtime/disk planning, transfer, and checksum instructions.
 
 ## Validation completed
@@ -51,6 +53,9 @@ Updated: 2026-08-25
 - Lightweight restart-in-place orchestration check passed with a fake Julia executable:
   - The generated restart command preserves the original CLI arguments.
   - `--resume-dir` reuses the existing run directory and stage history.
+- GNU `screen` launcher dry-run passed with a fake `screen` executable:
+  - The named detached session receives the complete quoted runner command.
+  - The launcher rejects invocations that omit an explicit `--smoke` or `--full` mode.
 - Direct one-epoch CPU SAE smoke passed:
   - Checkpoint: `/tmp/gmldatasets-sae-smoke.h5`
   - Record: `/tmp/gmldatasets-sae-smoke.csv`

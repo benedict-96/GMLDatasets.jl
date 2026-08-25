@@ -18,9 +18,17 @@ Use `--allow-dirty` only deliberately; the patch and status are included in the 
 
 ## Smoke test
 
+For an SSH-accessible run that survives disconnects, launch it in a detached GNU `screen` session:
+
 ```bash
-scripts/revision/run_experiments.sh --smoke --allow-dirty --allow-any-gpu --allow-no-cuda
+scripts/revision/run_in_screen.sh --session gml-smoke --smoke
+screen -r gml-smoke
 ```
+
+Detach without stopping the run by pressing `Ctrl-A`, then `D`. Reconnect later with
+`screen -r gml-smoke`; use `screen -ls` to list sessions. For local CPU-only testing, invoke
+`run_experiments.sh` directly with `--allow-dirty --allow-any-gpu --allow-no-cuda` rather than
+using the workstation command above.
 
 Limit stages with `--stages mnist,pendulum` and configurations with
 `--configurations adam-stiefel`. Smoke mode uses one seed and two epochs.
@@ -28,7 +36,8 @@ Limit stages with `--stages mnist,pendulum` and configurations with
 ## Full RTX 4090 run
 
 ```bash
-nohup scripts/revision/run_experiments.sh --full > revision-launch.log 2>&1 &
+scripts/revision/run_in_screen.sh --session gml-revision --full
+screen -r gml-revision
 ```
 
 Full mode requires exactly ten seeds. Override them explicitly with
@@ -51,6 +60,12 @@ does not yet resume within an epoch matrix.
 ```bash
 tail -f results/revision/<stamp>/run.log
 cat results/revision/<stamp>/stages.csv
+```
+
+To restart inside a new detached session, copy the command from `restart-command.txt` and run:
+
+```bash
+screen -DmS gml-revision-resume bash -lc 'cd /path/to/GMLDatasets && exec <restart-command>'
 ```
 
 ## Transfer and verify
