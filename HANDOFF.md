@@ -8,7 +8,7 @@ Updated: 2026-08-25
 - Branch: `revision-measurement-harness`
 - Base: PR #4 branch `pendulum-dataset`
 - Base commit: `2d4a40eec0f0a5a7bf41f8ecb2a64c23792766a3`
-- The branch has not yet been committed, pushed, or opened as a pull request.
+- Commit `5906b2d` is pushed to `fork/revision-measurement-harness`; a draft pull request is pending.
 
 ## Implemented
 
@@ -46,6 +46,9 @@ Updated: 2026-08-25
 - `bash -n` passes for both shell runners.
 - `Meta.parseall` passes for all modified/added Julia scripts.
 - `git diff --check` passes.
+- Lightweight restart-in-place orchestration check passed with a fake Julia executable:
+  - The generated restart command preserves the original CLI arguments.
+  - `--resume-dir` reuses the existing run directory and stage history.
 - Direct one-epoch CPU SAE smoke passed:
   - Checkpoint: `/tmp/gmldatasets-sae-smoke.h5`
   - Record: `/tmp/gmldatasets-sae-smoke.csv`
@@ -66,7 +69,7 @@ Updated: 2026-08-25
 ## Resume commands
 
 ```bash
-cd /Users/benbradmin/Documents/GMLDataSets
+cd /Users/benbradmin/Documents/GMLDatasets
 git status --short --branch
 bash -n scripts/revision/run_experiments.sh scripts/geometric_optimizers/run_mnist_repetitions.sh
 julia --startup-file=no -e 'for path in ARGS; Meta.parseall(read(path, String)); println("parsed ", path); end' \
@@ -76,5 +79,4 @@ julia --startup-file=no -e 'for path in ARGS; Meta.parseall(read(path, String));
 git diff --check
 ```
 
-After reviewing the diff, commit and push `revision-measurement-harness`, then open a **draft** pull request targeting `pendulum-dataset` (not `main`).
-
+After reviewing the diff, commit and push the remaining handoff fixes, then open a **draft** pull request targeting `pendulum-dataset` (not `main`).

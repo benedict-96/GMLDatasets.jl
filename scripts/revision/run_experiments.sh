@@ -4,12 +4,14 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+original_args=("$@")
 julia_bin="${JULIA:-julia}"
 mode="full"
 stages="mnist,fashion-mnist,pendulum,retraction"
 seeds="1234,1235,1236,1237,1238,1239,1240,1241,1242,1243"
 configurations="${MNIST_CONFIGURATIONS:-all}"
 output_root="${GML_RESULTS_ROOT:-$repo_root/results/revision}"
+resume_dir=""
 allow_dirty=0
 allow_any_gpu=0
 allow_no_cuda=0
@@ -18,7 +20,7 @@ retraction_repo="${GEOMETRIC_OPTIMIZERS_REPO:-$repo_root/../GeometricOptimizers}
 usage() {
     cat <<USAGE
 usage: $0 [--smoke|--full] [--stages LIST] [--seeds LIST]
-          [--configurations LIST] [--output-dir DIR] [--allow-dirty]
+          [--configurations LIST] [--output-dir DIR] [--resume-dir DIR] [--allow-dirty]
           [--allow-any-gpu] [--allow-no-cuda] [--retraction-repo DIR]
 USAGE
 }
@@ -31,6 +33,7 @@ while (( $# )); do
         --seeds) seeds="${2:?missing seed list}"; shift 2 ;;
         --configurations) configurations="${2:?missing configuration list}"; shift 2 ;;
         --output-dir) output_root="${2:?missing output directory}"; shift 2 ;;
+        --resume-dir) resume_dir="${2:?missing run directory}"; shift 2 ;;
         --allow-dirty) allow_dirty=1; shift ;;
         --allow-any-gpu) allow_any_gpu=1; shift ;;
         --allow-no-cuda) allow_no_cuda=1; shift ;;
@@ -47,13 +50,18 @@ if [[ "$mode" == full && ${#seed_array[@]} -ne 10 ]]; then
     exit 2
 fi
 
-stamp="$(date -u +%Y%m%dT%H%M%SZ)_${mode}"
-run_dir="$output_root/$stamp"
+if [[ -n "$resume_dir" ]]; then
+    run_dir="$(cd "$(dirname "$resume_dir")" && pwd)/$(basename "$resume_dir")"
+    output_root="$(dirname "$run_dir")"
+else
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)_${mode}"
+    run_dir="$output_root/$stamp"
+fi
 mkdir -p "$run_dir" || exit 1
 [[ -w "$run_dir" ]] || { echo "output directory is not writable: $run_dir" >&2; exit 1; }
 log="$run_dir/run.log"
 status_file="$run_dir/stages.csv"
-printf 'stage,status,started_utc,finished_utc,command\n' > "$status_file"
+[[ -s "$status_file" ]] || printf 'stage,status,started_utc,finished_utc,command\n' > "$status_file"
 
 archive_results() {
     local exit_code=$?
@@ -69,7 +77,7 @@ archive_results() {
         git -C "$retraction_repo" status --porcelain=v1 > "$run_dir/geometricoptimizers.status"
         git -C "$retraction_repo" diff --binary > "$run_dir/geometricoptimizers.patch"
     fi
-    printf '%q ' "$0" "$@" > "$run_dir/restart-command.txt"
+    printf '%q ' "$0" --resume-dir "$run_dir" "${original_args[@]}" > "$run_dir/restart-command.txt"
     printf '\n' >> "$run_dir/restart-command.txt"
     tar -C "$output_root" -czf "$run_dir.tar.gz" "$(basename "$run_dir")"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -81,7 +89,7 @@ archive_results() {
     echo "checksum: $run_dir.tar.gz.sha256"
     exit "$exit_code"
 }
-trap 'archive_results "$@"' EXIT
+trap archive_results EXIT
 
 exec > >(tee -a "$log") 2>&1
 

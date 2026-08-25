@@ -42,10 +42,11 @@ smoke run are known.
 
 ## Resume and monitor
 
-The runner prints an exact restart command into `restart-command.txt`. Reuse the same
-`--output-dir` and stage filters when restarting. Pendulum checkpoints that already exist and are
-non-empty are skipped; image runs retain their partial JLD2, CSV, report, and stdout files for
-inspection but are rerun because the legacy trainer does not yet resume within an epoch matrix.
+The runner prints an exact restart command into `restart-command.txt`. It includes `--resume-dir`
+so the existing run directory, logs, stage history, and completed pendulum checkpoints are reused.
+Pendulum checkpoints that already exist and are non-empty are skipped; image runs retain their
+partial JLD2, CSV, report, and stdout files for inspection but are rerun because the legacy trainer
+does not yet resume within an epoch matrix.
 
 ```bash
 tail -f results/revision/<stamp>/run.log
