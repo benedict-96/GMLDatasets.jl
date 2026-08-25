@@ -8,7 +8,9 @@ Updated: 2026-08-25
 - Branch: `revision-measurement-harness`
 - Base: PR #4 branch `pendulum-dataset`
 - Base commit: `2d4a40eec0f0a5a7bf41f8ecb2a64c23792766a3`
-- Commit `5906b2d` is pushed to `fork/revision-measurement-harness`; a draft pull request is pending.
+- Draft PR [benedict-96/GMLDatasets.jl#1](https://github.com/benedict-96/GMLDatasets.jl/pull/1)
+  targets the fork's `pendulum-dataset` branch. The reviewed implementation and restart fix are
+  complete through `b142b03158204211b7414cbebbf2be043cfb8fcf`.
 
 ## Implemented
 
@@ -79,4 +81,5 @@ julia --startup-file=no -e 'for path in ARGS; Meta.parseall(read(path, String));
 git diff --check
 ```
 
-After reviewing the diff, commit and push the remaining handoff fixes, then open a **draft** pull request targeting `pendulum-dataset` (not `main`).
+Continue the remaining experiment coverage and instrumentation work on draft PR #1 before running
+the full RTX 4090 matrix.
