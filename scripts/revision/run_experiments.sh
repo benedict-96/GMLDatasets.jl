@@ -50,6 +50,16 @@ if [[ "$mode" == full && ${#seed_array[@]} -ne 10 ]]; then
     exit 2
 fi
 
+if [[ "$mode" == full && "${GML_ALLOW_INCOMPLETE_MATRIX:-0}" != 1 ]]; then
+    cat >&2 <<'MESSAGE'
+full revision runs are blocked because the required Cayley ADAM (`ScalarMomentAdam`) row is not
+yet supported by GeometricMachineLearning's mixed parameter-tree optimizer adapter. Set
+GML_ALLOW_INCOMPLETE_MATRIX=1 only to reproduce the legacy four-configuration matrix; do not use
+that output as the complete reviewer-response experiment.
+MESSAGE
+    exit 1
+fi
+
 if [[ -n "$resume_dir" ]]; then
     run_dir="$(cd "$(dirname "$resume_dir")" && pwd)/$(basename "$resume_dir")"
     output_root="$(dirname "$run_dir")"

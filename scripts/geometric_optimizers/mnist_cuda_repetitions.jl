@@ -23,8 +23,10 @@
 # objective, the gradient, the schedule and the bars the runs are judged against — is that of
 # `mnist_cuda.jl`, so a repetition here is comparable to the corresponding run there.
 #
-# By default it repeats `Stiefel weights, Adam`, which is the configuration the paper's result
-# rests on. `MNIST_CONFIGURATIONS` selects others. For `gradient` and `momentum` the default
+# By default it repeats geometric Adam with Stiefel weights and the package-default Cayley
+# retraction, which is the configuration the paper's result rests on. This is not Cayley ADAM:
+# that name is reserved for `ScalarMomentAdam` from Li et al. (2020). `MNIST_CONFIGURATIONS`
+# selects other configurations. For `gradient` and `momentum` the default
 # (a seed per repetition) measures the spread over *initializations*, which is a meaningful
 # number but a different one; with `MNIST_VARY_SEED=0` those two would reproduce their run and
 # the repetitions would cost ≈1:50 h each to confirm it.
@@ -36,7 +38,7 @@
 # ≈8 h, about the same as the ≈6:53 h `mnist_cuda.jl` takes for all four. Run it the same way,
 # in a `screen`, through the wrapper next to it:
 #
-#   screen -dmS mnist scripts/geometric_optimizers/run_mnist_repetitions.sh              # 5 × Stiefel weights, Adam
+#   screen -dmS mnist scripts/geometric_optimizers/run_mnist_repetitions.sh              # 10 × geometric Adam
 #   screen -dmS mnist scripts/geometric_optimizers/run_mnist_repetitions.sh --repeat 3   # 3 of them
 #   scripts/geometric_optimizers/run_mnist_repetitions.sh --smoke                        # 3 × 2 epochs, ≈4 min
 #
@@ -62,9 +64,10 @@
 #
 # ## Environment variables
 #
-#   MNIST_REPETITIONS     how often each configuration is trained    (default 5)
-#   MNIST_CONFIGURATIONS  which ones, comma separated: `adam-stiefel`, `adam-regular`,
-#                         `gradient`, `momentum`, or `all`           (default adam-stiefel)
+#   MNIST_REPETITIONS     how often each configuration is trained   (default 10)
+#   MNIST_CONFIGURATIONS  which ones, comma separated: `geometric-adam-cayley`,
+#                         `standard-adam`, `gradient`, `momentum`, or `all`
+#                         (`adam-stiefel` and `adam-regular` remain accepted aliases)
 #   MNIST_VARY_SEED       repetition `r` gets the seed `seed + r - 1` (default 1); with `0`
 #                         every repetition uses the same seed, which measures the
 #                         nondeterminism above rather than the spread of the method
@@ -745,7 +748,7 @@ end
 # ------------------------------------------------------------------ configurations ---
 
 # The four configurations of `mnist_cuda.jl`, by key. `learns` is what the configuration is
-# expected to do; `regular weights, Adam` is the baseline of the paper and is expected to
+# expected to do; standard Adam is the non-geometric ablation and is expected to
 # collapse onto the trivial prediction (see the header of `mnist_cuda.jl` for why, and why a
 # flat loss there is the experiment working rather than a defect).
 #
@@ -753,14 +756,26 @@ end
 # converted the way `MomentumMethod` is, so `Adam(T)` is what dispatches to the `Float32`
 # cache.
 const configurations = Dict(
-    "adam-stiefel" => (name="Stiefel weights, Adam", stiefel=true, learns=true, algorithm=Adam(T)),
-    "adam-regular" => (name="regular weights, Adam", stiefel=false, learns=false, algorithm=Adam(T)),
-    "gradient" => (name="Stiefel weights, gradient", stiefel=true, learns=true, algorithm=GradientMethod()),
-    "momentum" => (name="Stiefel weights, momentum", stiefel=true, learns=true, algorithm=MomentumMethod(momentum_coefficient)),
+    "geometric-adam-cayley" => (name="Geometric Adam (Stiefel, Cayley retraction)",
+        role="proposed", stiefel=true, learns=true, algorithm=Adam(T),
+        retraction="cayley", second_moment="coordinate-wise", transport="global-section"),
+    "standard-adam" => (name="Standard Adam (unconstrained)", role="non-geometric-ablation",
+        stiefel=false, learns=false, algorithm=Adam(T), retraction="none",
+        second_moment="coordinate-wise", transport="none"),
+    "gradient" => (name="Riemannian gradient (Stiefel, Cayley retraction)", role="diagnostic",
+        stiefel=true, learns=true, algorithm=GradientMethod(), retraction="cayley",
+        second_moment="none", transport="none"),
+    "momentum" => (name="Riemannian momentum (Stiefel, Cayley retraction)", role="diagnostic",
+        stiefel=true, learns=true, algorithm=MomentumMethod(momentum_coefficient),
+        retraction="cayley", second_moment="none", transport="global-section"),
 )
 
 # in the order of `mnist_cuda.jl`, so that a report of all four is read next to that one
-const configuration_order = ["adam-stiefel", "adam-regular", "gradient", "momentum"]
+const configuration_order = ["geometric-adam-cayley", "standard-adam", "gradient", "momentum"]
+const configuration_aliases = Dict(
+    "adam-stiefel" => "geometric-adam-cayley",
+    "adam-regular" => "standard-adam",
+)
 
 """
     selected_configurations()
@@ -770,8 +785,9 @@ resolved before MNIST is loaded, so that an unknown key is one line now rather t
 run eight hours from now.
 """
 function selected_configurations()
-    requested = get(ENV, "MNIST_CONFIGURATIONS", "adam-stiefel")
-    keys_requested = String.(strip.(split(lowercase(requested), ','; keepempty=false)))
+    requested = get(ENV, "MNIST_CONFIGURATIONS", "geometric-adam-cayley")
+    keys_requested = [get(configuration_aliases, key, key) for key in
+                      String.(strip.(split(lowercase(requested), ','; keepempty=false)))]
     "all" in keys_requested && return configuration_order
     unknown = filter(k -> !haskey(configurations, k), keys_requested)
     isempty(unknown) ||
@@ -872,6 +888,10 @@ function save_results(results)
     for (i, result) in pairs(results)
         output["name$i"] = result.name
         output["configuration$i"] = result.configuration
+        output["optimizer_role$i"] = result.optimizer_role
+        output["retraction$i"] = result.retraction
+        output["second_moment$i"] = result.second_moment
+        output["transport$i"] = result.transport
         output["repetition$i"] = result.repetition
         output["seed$i"] = result.seed
         output["parameters$i"] = result.parameters
@@ -899,21 +919,23 @@ csv_field(value) = "\"" * replace(string(value), '"' => "\"\"") * "\""
 
 function write_run_records(results, failures)
     open(records_path, "w") do io
-        println(io, "schema_version,dataset,configuration,repetition,seed,status,epochs_completed,final_loss,best_loss,test_accuracy,total_seconds,seconds_per_epoch,peak_device_bytes,backend,message")
+        println(io, "schema_version,dataset,configuration,optimizer_role,retraction,second_moment,transport,repetition,seed,status,epochs_completed,final_loss,best_loss,test_accuracy,total_seconds,seconds_per_epoch,peak_device_bytes,backend,message")
         for result in results
             epochs_completed = length(result.epoch_losses)
             final_loss = isempty(result.epoch_losses) ? NaN : last(result.epoch_losses)
             best_loss = isempty(result.epoch_losses) ? NaN : minimum(result.epoch_losses)
             result_verdict = verdict(result)
             status = result_verdict == "ok" ? "ok" : "failed_validation"
-            println(io, join((1, csv_field(dataset_name), csv_field(result.configuration),
+            println(io, join((2, csv_field(dataset_name), csv_field(result.configuration),
+                csv_field(result.optimizer_role), csv_field(result.retraction),
+                csv_field(result.second_moment), csv_field(result.transport),
                 result.repetition, result.seed, status, epochs_completed, final_loss, best_loss,
                 result.accuracy, result.total_time,
                 result.total_time / max(epochs_completed, 1), result.peak_device_bytes,
                 use_cuda ? "cuda" : "cpu", csv_field(result_verdict)), ','))
         end
         for (name, message) in failures
-            println(io, join((1, csv_field(dataset_name), csv_field(name), 0, 0, "exception", 0,
+            println(io, join((2, csv_field(dataset_name), csv_field(name), "", "", "", "", 0, 0, "exception", 0,
                 NaN, NaN, NaN, NaN, NaN, peak_used[], use_cuda ? "cuda" : "cpu",
                 csv_field(first(split(message, '\n')))), ','))
         end
@@ -937,7 +959,8 @@ for (j, job) in pairs(jobs)
             n_epochs=n_epochs)
         score = T(accuracy(trained.parameters, test_input, test_output))
         push!(results, (name=name, configuration=run.name, repetition=job.repetition, seed=job.seed,
-            stiefel=run.stiefel, learns=run.learns,
+            stiefel=run.stiefel, learns=run.learns, optimizer_role=run.role,
+            retraction=run.retraction, second_moment=run.second_moment, transport=run.transport,
             parameters=map(_array, trained.parameters), losses=trained.losses,
             epoch_losses=trained.epoch_losses, epoch_times=trained.epoch_times,
             accuracy_epochs=trained.accuracy_epochs, accuracies=trained.accuracies,
@@ -1123,7 +1146,7 @@ for key in selected
 end
 if any(r -> !r.learns, results)
     announce()
-    announce("`regular weights, Adam` is the baseline of the paper and is expected to stall at the")
+    announce("`Standard Adam (unconstrained)` is the non-geometric ablation and is expected to stall at the")
     announce(@sprintf("trivial-prediction plateau of %.3f at an accuracy of %.2f; without the Stiefel constraint",
         trivial_loss, chance_accuracy))
     announce("the gradient vanishes through the 16 unnormalized transformer blocks. It is a failure above")

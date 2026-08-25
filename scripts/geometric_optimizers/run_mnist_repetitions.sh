@@ -41,11 +41,11 @@ cd "$(dirname "$0")/.."
 julia_bin="${JULIA:-julia}"
 mode="repetitions"
 repetitions=""      # what `--repeat` said, if it was given at all
-configurations="${MNIST_CONFIGURATIONS:-adam-stiefel}"
+configurations="${MNIST_CONFIGURATIONS:-geometric-adam-cayley}"
 
 usage() {
     echo "usage: $0 [--smoke] [--repeat N] [-c|--configurations LIST]" >&2
-    echo "  LIST is comma separated: adam-stiefel, adam-regular, gradient, momentum, or all" >&2
+    echo "  LIST is comma separated: geometric-adam-cayley, standard-adam, gradient, momentum, or all" >&2
 }
 
 while [ $# -gt 0 ]; do

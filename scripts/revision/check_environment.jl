@@ -1,4 +1,6 @@
 using CUDA
+using GeometricMachineLearning
+using GeometricOptimizers
 using Pkg
 
 required_name = get(ENV, "GML_REQUIRED_GPU", "RTX 4090")
@@ -16,5 +18,16 @@ println("device=", device_name)
 println("driver_version=", functional ? CUDA.driver_version() : "unavailable")
 println("runtime_version=", functional ? CUDA.runtime_version() : "unavailable")
 println("threads=", Threads.nthreads())
+gml_version = pkgversion(GeometricMachineLearning)
+go_version = pkgversion(GeometricOptimizers)
+println("geometric_machine_learning_version=", gml_version)
+println("geometric_optimizers_version=", go_version)
+
+if gml_version ≥ v"0.6.0" && go_version ≥ v"0.5.0"
+    error("GeometricMachineLearning $gml_version and GeometricOptimizers $go_version are not a " *
+          "released compatible stack: GML 0.6 declares GeometricOptimizers 0.4 and does not " *
+          "yet integrate ScalarMomentAdam. Pin a reviewed GML compatibility update before " *
+          "running revision experiments.")
+end
 Pkg.status(; mode=Pkg.PKGMODE_MANIFEST)
 functional && CUDA.versioninfo()

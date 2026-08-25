@@ -12,6 +12,12 @@ Instantiate the pinned scripts environment before disconnecting from the network
 julia --project=scripts -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 ```
 
+The checked-in manifest currently records the last working pre-release GML stack. Do not replace it
+with the independently latest releases: `GeometricMachineLearning` v0.6.0 declares
+`GeometricOptimizers` 0.4 compatibility, while `GeometricOptimizers` v0.5.0 requires the newer
+parameter package and supplies `ScalarMomentAdam`. The environment preflight rejects that known
+incompatible combination. Pin a reviewed GML compatibility update before producing paper results.
+
 The full run rejects a dirty tree and any CUDA device whose name does not contain `RTX 4090`.
 Use `--allow-dirty` only deliberately; the patch and status are included in the bundle. Use
 `--allow-any-gpu` only for local smoke testing.
@@ -31,9 +37,16 @@ Detach without stopping the run by pressing `Ctrl-A`, then `D`. Reconnect later 
 using the workstation command above.
 
 Limit stages with `--stages mnist,pendulum` and configurations with
-`--configurations adam-stiefel`. Smoke mode uses one seed and two epochs.
+`--configurations geometric-adam-cayley`. The legacy keys `adam-stiefel` and `adam-regular` remain
+accepted aliases. Smoke mode uses one seed and two epochs.
 
 ## Full RTX 4090 run
+
+Full paper runs are intentionally blocked until GML can apply `ScalarMomentAdam` to the experiment's
+mixed parameter tree. The existing geometric-Adam row already uses the default Cayley retraction,
+but it is the proposed coordinate-wise method, not the Cayley ADAM scalar-moment baseline. Once the
+adapter and dependency pin are reviewed, remove the guard in `run_experiments.sh` and add the
+required Cayley ADAM row. `GML_ALLOW_INCOMPLETE_MATRIX=1` exists only to reproduce the legacy matrix.
 
 ```bash
 scripts/revision/run_in_screen.sh --session gml-revision --full
