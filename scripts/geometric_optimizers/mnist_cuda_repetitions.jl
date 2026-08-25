@@ -106,6 +106,7 @@ synchronize_device() = use_cuda ? CUDA.synchronize() : nothing
 const report_path = get(ENV, "MNIST_REPORT", "mnist_repetitions_report.txt")
 const output_path = get(ENV, "MNIST_OUTPUT", "mnist_repetitions.jld2")
 const losses_path = get(ENV, "MNIST_LOSSES", "mnist_repetitions_losses.csv")
+const records_path = get(ENV, "MNIST_RECORDS", "mnist_repetitions_runs.csv")
 const report_io = open(report_path, "w")
 
 const losses_io = open(losses_path, "w")
@@ -229,17 +230,15 @@ const add_connection = false
 const T = Float32
 const learning_rate = T(1e-3)
 const momentum_coefficient = T(0.5)
-const seed = 1234
+const seed = parse(Int, get(ENV, "MNIST_BASE_SEED", "1234"))
 
 const batch_size = parse(Int, get(ENV, "MNIST_BATCH_SIZE", "2048"))
 const n_epochs = parse(Int, get(ENV, "MNIST_N_EPOCHS", "500"))
 const accuracy_every = parse(Int, get(ENV, "MNIST_ACCURACY_EVERY", "25"))
 
-# How often each selected configuration is trained. Five is the smallest number that gives a
-# standard deviation worth printing (four degrees of freedom) and still fits in a night on one
-# GPU. `1` is allowed — it is then the single training `mnist_cuda.jl` performs, and the report
-# says so instead of printing a deviation it does not have.
-const n_repetitions = parse(Int, get(ENV, "MNIST_REPETITIONS", "5"))
+# The revision protocol uses ten independently seeded repetitions. `1` remains valid for smoke
+# tests and debugging.
+const n_repetitions = parse(Int, get(ENV, "MNIST_REPETITIONS", "10"))
 @assert n_repetitions ≥ 1 "MNIST_REPETITIONS must be at least 1"
 
 # Whether the repetitions differ in their seed. See the header: with a varying seed the spread
@@ -247,8 +246,13 @@ const n_repetitions = parse(Int, get(ENV, "MNIST_REPETITIONS", "5"))
 # to quote for a result; with a fixed seed it is the nondeterminism alone, which is what made
 # this script necessary and is worth being able to measure separately.
 const vary_seed = parse(Bool, get(ENV, "MNIST_VARY_SEED", "1"))
+const requested_seeds = let value = strip(get(ENV, "MNIST_SEEDS", ""))
+    isempty(value) ? Int[] : parse.(Int, strip.(split(value, ','; keepempty=false)))
+end
+isempty(requested_seeds) || length(requested_seeds) == n_repetitions ||
+    error("MNIST_SEEDS contains $(length(requested_seeds)) seeds but MNIST_REPETITIONS=$n_repetitions")
 
-repetition_seed(r::Integer) = vary_seed ? seed + r - 1 : seed
+repetition_seed(r::Integer) = !isempty(requested_seeds) ? requested_seeds[r] : vary_seed ? seed + r - 1 : seed
 
 const dim = patch_length^2                      # the transformer dimension
 const seq_length = (28 ÷ patch_length)^2        # the number of patches
@@ -675,6 +679,7 @@ function train(stiefel::Bool, algorithm::GeometricOptimizers.OptimizerMethod, in
     accuracies = T[]
     orthonormalities = T[]
     stopped = ""
+    peak_used[] = 0
 
     synchronize_device()
     initial_time = time()
@@ -734,7 +739,7 @@ function train(stiefel::Bool, algorithm::GeometricOptimizers.OptimizerMethod, in
 
     (parameters=ps, losses=losses, epoch_losses=epoch_losses, epoch_times=epoch_times,
         accuracy_epochs=accuracy_epochs, accuracies=accuracies, orthonormalities=orthonormalities,
-        total_time=total_time, stopped=stopped)
+        total_time=total_time, stopped=stopped, peak_device_bytes=peak_used[])
 end
 
 # ------------------------------------------------------------------ configurations ---
@@ -777,6 +782,9 @@ function selected_configurations()
 end
 
 const selected = selected_configurations()
+const dataset_name = lowercase(get(ENV, "MNIST_DATASET", "mnist"))
+dataset_name in ("mnist", "fashion-mnist") ||
+    error("MNIST_DATASET must be `mnist` or `fashion-mnist`, got `$dataset_name`")
 
 # One entry per training, in the order they are run: all repetitions of a configuration before
 # the next one, so that a run which is cut short has complete statistics for the configurations
@@ -788,9 +796,10 @@ const jobs = [(key=key, configuration=configurations[key], repetition=r, seed=re
 
 const script_start = time()
 
-println("loading MNIST ...")
-train_x, train_y = MLDatasets.MNIST(split=:train)[:]
-test_x, test_y = MLDatasets.MNIST(split=:test)[:]
+println("loading $dataset_name ...")
+dataset = dataset_name == "mnist" ? MLDatasets.MNIST : MLDatasets.FashionMNIST
+train_x, train_y = dataset(split=:train)[:]
+test_x, test_y = dataset(split=:test)[:]
 
 # the data set stays on the host; the batches are uploaded one at a time
 const train_input = split_and_flatten(T.(train_x), patch_length)
@@ -886,6 +895,31 @@ function save_results(results)
     JLD2.save(output_path, output)
 end
 
+csv_field(value) = "\"" * replace(string(value), '"' => "\"\"") * "\""
+
+function write_run_records(results, failures)
+    open(records_path, "w") do io
+        println(io, "schema_version,dataset,configuration,repetition,seed,status,epochs_completed,final_loss,best_loss,test_accuracy,total_seconds,seconds_per_epoch,peak_device_bytes,backend,message")
+        for result in results
+            epochs_completed = length(result.epoch_losses)
+            final_loss = isempty(result.epoch_losses) ? NaN : last(result.epoch_losses)
+            best_loss = isempty(result.epoch_losses) ? NaN : minimum(result.epoch_losses)
+            result_verdict = verdict(result)
+            status = result_verdict == "ok" ? "ok" : "failed_validation"
+            println(io, join((1, csv_field(dataset_name), csv_field(result.configuration),
+                result.repetition, result.seed, status, epochs_completed, final_loss, best_loss,
+                result.accuracy, result.total_time,
+                result.total_time / max(epochs_completed, 1), result.peak_device_bytes,
+                use_cuda ? "cuda" : "cpu", csv_field(result_verdict)), ','))
+        end
+        for (name, message) in failures
+            println(io, join((1, csv_field(dataset_name), csv_field(name), 0, 0, "exception", 0,
+                NaN, NaN, NaN, NaN, NaN, peak_used[], use_cuda ? "cuda" : "cpu",
+                csv_field(first(split(message, '\n')))), ','))
+        end
+    end
+end
+
 results = []
 failures = Tuple{String,String}[]
 
@@ -909,6 +943,7 @@ for (j, job) in pairs(jobs)
             accuracy_epochs=trained.accuracy_epochs, accuracies=trained.accuracies,
             orthonormalities=trained.orthonormalities,
             total_time=trained.total_time, accuracy=score, stopped=trained.stopped,
+            peak_device_bytes=trained.peak_device_bytes,
             orthonormality=orthonormality_error(trained.parameters),
             sound=parameters_are_sound(trained.parameters)))
         announce(@sprintf("%s done in %s (%.2f s/step), test accuracy %.4f", label,
@@ -1096,9 +1131,11 @@ if any(r -> !r.learns, results)
 end
 
 save_results(results)
+write_run_records(results, failures)
 announce()
 announce("parameters:   " * abspath(output_path))
 announce("loss curves:  " * abspath(losses_path))
+announce("run records:  " * abspath(records_path))
 announce("this report:  " * abspath(report_path))
 close(losses_io)
 close(report_io)

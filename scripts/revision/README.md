@@ -1,0 +1,64 @@
+# Revision experiment runner
+
+Run these commands from any directory. The runner creates a timestamped directory, streams every
+stage to durable logs, records stage status, captures the Julia/CUDA/NVIDIA and Git environments,
+and always packages the partial or complete directory as a `.tar.gz` plus SHA-256 checksum.
+
+## Setup
+
+Instantiate the pinned scripts environment before disconnecting from the network:
+
+```bash
+julia --project=scripts -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+```
+
+The full run rejects a dirty tree and any CUDA device whose name does not contain `RTX 4090`.
+Use `--allow-dirty` only deliberately; the patch and status are included in the bundle. Use
+`--allow-any-gpu` only for local smoke testing.
+
+## Smoke test
+
+```bash
+scripts/revision/run_experiments.sh --smoke --allow-dirty --allow-any-gpu --allow-no-cuda
+```
+
+Limit stages with `--stages mnist,pendulum` and configurations with
+`--configurations adam-stiefel`. Smoke mode uses one seed and two epochs.
+
+## Full RTX 4090 run
+
+```bash
+nohup scripts/revision/run_experiments.sh --full > revision-launch.log 2>&1 &
+```
+
+Full mode requires exactly ten seeds. Override them explicitly with
+`--seeds 1234,1235,1236,1237,1238,1239,1240,1241,1242,1243`. The default stage list is
+`mnist,fashion-mnist,pendulum,retraction`.
+
+Budget several days for the complete two-dataset, four-configuration, ten-seed matrix. The existing
+RTX 4090 measurement is about 95 minutes for one 500-epoch MNIST Adam configuration; use the smoke
+logs to refine the estimate before launch. Keep at least 20 GiB free until checkpoint sizes from the
+smoke run are known.
+
+## Resume and monitor
+
+The runner prints an exact restart command into `restart-command.txt`. Reuse the same
+`--output-dir` and stage filters when restarting. Pendulum checkpoints that already exist and are
+non-empty are skipped; image runs retain their partial JLD2, CSV, report, and stdout files for
+inspection but are rerun because the legacy trainer does not yet resume within an epoch matrix.
+
+```bash
+tail -f results/revision/<stamp>/run.log
+cat results/revision/<stamp>/stages.csv
+```
+
+## Transfer and verify
+
+Copy both generated files off the workstation:
+
+```bash
+scp results/revision/<stamp>.tar.gz* HOST:/path/to/OptimizerPaper/results/
+sha256sum -c <stamp>.tar.gz.sha256
+```
+
+On macOS, verify with `shasum -a 256 -c <stamp>.tar.gz.sha256`.

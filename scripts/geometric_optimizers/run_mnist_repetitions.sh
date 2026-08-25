@@ -5,7 +5,7 @@
 #
 #   screen -S mnist                                     # then, inside it:
 #   scripts/geometric_optimizers/run_mnist_repetitions.sh --smoke            # 3 × 2 epochs, ≈4 min
-#   scripts/geometric_optimizers/run_mnist_repetitions.sh                    # 5 × 500 epochs of Adam on Stiefel, ≈8 h
+#   scripts/geometric_optimizers/run_mnist_repetitions.sh                    # 10 × 500 epochs of Adam on Stiefel
 #   scripts/geometric_optimizers/run_mnist_repetitions.sh --repeat 3         # 3 of them, ≈4:45 h
 #   scripts/geometric_optimizers/run_mnist_repetitions.sh -c all --repeat 3   # all four configurations, ≈21 h
 #
@@ -17,7 +17,7 @@
 # One repetition is one configuration of the full run, i.e. ≈1:35 h for `Adam` on an RTX 4090 —
 # multiply. This is the sibling of `run_mnist_cuda.sh`, which runs all four configurations
 # *once* and is what the learning curves of the documentation come from; this one answers how
-# far a single accuracy from it can be trusted. It leaves the same four files behind in
+# far a single accuracy from it can be trusted. It leaves five files behind in
 # `results/`:
 #
 #   <stamp>_report.txt        the environment, the gradient checks, one line per epoch and
@@ -26,6 +26,7 @@
 #                             run, configuration, repetition, epoch, batch, step, loss
 #   <stamp>_parameters.jld2   the parameters, losses, timings and accuracies of every
 #                             repetition, plus the samples the statistics come from
+#   <stamp>_runs.csv          one machine-readable outcome/timing record per repetition
 #   <stamp>_stdout.txt        everything the process wrote, including a backtrace if it died
 #
 # `<stamp>` is the start time, so a second run never overwrites the first. Copy all four off
@@ -58,13 +59,13 @@ while [ $# -gt 0 ]; do
 done
 
 # `--repeat` wins over `MNIST_REPETITIONS`, which wins over the default — and the default of a
-# smoke test is three rather than five, so that it stays a smoke test when neither was given
+# smoke test is three rather than ten, so that it stays a smoke test when neither was given
 # while still computing a deviation over more than two samples.
 if [ -z "$repetitions" ]; then
     if [ "$mode" = "smoke" ]; then
         repetitions="${MNIST_REPETITIONS:-3}"
     else
-        repetitions="${MNIST_REPETITIONS:-5}"
+        repetitions="${MNIST_REPETITIONS:-10}"
     fi
 fi
 
@@ -80,6 +81,7 @@ mkdir -p results
 export MNIST_REPORT="results/${stamp}_report.txt"
 export MNIST_LOSSES="results/${stamp}_losses.csv"
 export MNIST_OUTPUT="results/${stamp}_parameters.jld2"
+export MNIST_RECORDS="results/${stamp}_runs.csv"
 export MNIST_REPETITIONS="$repetitions"
 export MNIST_CONFIGURATIONS="$configurations"
 stdout_log="results/${stamp}_stdout.txt"
@@ -105,6 +107,7 @@ echo "seeds             ${MNIST_VARY_SEED:-1} (0 = the same seed every time)"
 echo "report            $MNIST_REPORT"
 echo "loss curves       $MNIST_LOSSES"
 echo "parameters        $MNIST_OUTPUT"
+echo "run records       $MNIST_RECORDS"
 echo "stdout            $stdout_log"
 echo "follow it with    tail -f $MNIST_REPORT"
 echo
@@ -141,6 +144,7 @@ if [ "$status" -eq 0 ]; then
     echo "    $MNIST_REPORT"
     echo "    $MNIST_LOSSES"
     echo "    $MNIST_OUTPUT"
+    echo "    $MNIST_RECORDS"
     echo "    $stdout_log"
     echo "e.g. from the other machine:"
     echo "    scp '<user>@<host>:$(pwd)/results/${stamp}_*' ."
